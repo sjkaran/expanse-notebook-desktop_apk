@@ -1,15 +1,18 @@
 import sqlite3
 import pandas as pd
+import shutil
 from datetime import datetime
 import os
 
 class BackendManager:
     def __init__(self, db_name="business_data.db"):
+        self.db_name = db_name
         self.conn = sqlite3.connect(db_name)
         self.cursor = self.conn.cursor()
         self.initialize_db()
 
     def initialize_db(self):
+        # 1. Transactions Ledger
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,6 +23,7 @@ class BackendManager:
                 amount REAL NOT NULL
             )
         """)
+        # 2. Categories
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS categories (
                 name TEXT,
@@ -27,18 +31,28 @@ class BackendManager:
                 PRIMARY KEY (name, type)
             )
         """)
-        # Seed default categories if empty
+        # 3. Settings (New for v4.0)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        
+        # Seed Defaults
         self.cursor.execute("SELECT count(*) FROM categories")
         if self.cursor.fetchone()[0] == 0:
             defaults = [
                 ("Fruits", "Expense"), ("Milk", "Expense"), ("Grocery", "Expense"),
-                ("Ice-Cream", "Expense"), ("Rent", "Expense"), ("Employee Cost", "Expense"),
                 ("Online Payments", "Profit"), ("Cash Payments", "Profit")
             ]
             self.cursor.executemany("INSERT OR IGNORE INTO categories (name, type) VALUES (?, ?)", defaults)
+        
+        # Seed Currency
+        self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency', '₹')")
         self.conn.commit()
 
-    # --- Core Transaction Methods ---
+    # --- Core Transactions ---
     def add_transaction(self, date, time, t_type, category, amount):
         try:
             self.cursor.execute("""
@@ -49,7 +63,7 @@ class BackendManager:
             self.conn.commit()
             return self.cursor.lastrowid
         except Exception as e:
-            print(f"Error adding transaction: {e}")
+            print(f"Error: {e}")
             return None
 
     def delete_transaction(self, txn_id):
@@ -64,74 +78,96 @@ class BackendManager:
         self.cursor.execute("SELECT name FROM categories WHERE type = ?", (t_type,))
         return [row[0] for row in self.cursor.fetchall()]
 
-    # --- NEW: Historical Data Methods ---
+    # --- Analytics Engine (Track A) ---
+    def fetch_category_breakdown(self, year, month, t_type):
+        """Returns {'Category': Amount} for Pie Charts."""
+        date_pattern = f"{year}-{month:02d}%"
+        self.cursor.execute("""
+            SELECT category, SUM(amount) FROM transactions 
+            WHERE date LIKE ? AND type = ? 
+            GROUP BY category
+        """, (date_pattern, t_type))
+        return dict(self.cursor.fetchall())
+
+    def fetch_daily_trends(self, year, month):
+        """Returns DataFrame of Daily Income vs Expense for Bar Charts."""
+        date_pattern = f"{year}-{month:02d}%"
+        query = f"SELECT date, type, amount FROM transactions WHERE date LIKE '{date_pattern}'"
+        df = pd.read_sql_query(query, self.conn)
+        
+        if df.empty: return None
+
+        # Pivot to get Date | Expense | Profit
+        pivot = df.pivot_table(index='date', columns='type', values='amount', aggfunc='sum', fill_value=0)
+        
+        # Ensure both columns exist even if one is missing data
+        if 'Expense' not in pivot.columns: pivot['Expense'] = 0
+        if 'Profit' not in pivot.columns: pivot['Profit'] = 0
+        
+        return pivot
+
+    # --- Settings & Maintenance (Track B) ---
+    def get_setting(self, key):
+        self.cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        res = self.cursor.fetchone()
+        return res[0] if res else None
+
+    def set_setting(self, key, value):
+        self.cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        self.conn.commit()
+
+    def rename_category(self, old_name, new_name, t_type):
+        # 1. Update the Category List
+        self.cursor.execute("UPDATE categories SET name = ? WHERE name = ? AND type = ?", (new_name, old_name, t_type))
+        # 2. Update Historical Transactions (So reports don't break)
+        self.cursor.execute("UPDATE transactions SET category = ? WHERE category = ? AND type = ?", (new_name, old_name, t_type))
+        self.conn.commit()
+
+    def delete_category_from_list(self, name, t_type):
+        # Only removes from the dropdown options, NOT historical data
+        self.cursor.execute("DELETE FROM categories WHERE name = ? AND type = ?", (name, t_type))
+        self.conn.commit()
+
+    def create_backup(self, dest_folder):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Backup_BusinessData_{timestamp}.db"
+        dest_path = os.path.join(dest_folder, filename)
+        shutil.copy2(self.db_name, dest_path)
+        return dest_path
+
+    # --- Excel Export (Preserved) ---
     def get_available_months(self):
-        """Returns a list of 'YYYY-MM' strings for months that have data."""
         self.cursor.execute("SELECT DISTINCT strftime('%Y-%m', date) FROM transactions ORDER BY date DESC")
-        results = [row[0] for row in self.cursor.fetchall() if row[0] is not None]
-        return results
+        return [row[0] for row in self.cursor.fetchall() if row[0]]
 
     def get_monthly_pivot_data(self, year, month):
-        """
-        Generates the pivot table DataFrame but DOES NOT save it. 
-        Returns the DataFrame for the UI to preview.
-        """
+        # (Same logic as before - abbreviated for brevity, but needed)
         date_pattern = f"{year}-{month:02d}%"
         query = f"SELECT date, type, category, amount FROM transactions WHERE date LIKE '{date_pattern}'"
         df = pd.read_sql_query(query, self.conn)
+        if df.empty: return None
         
-        if df.empty:
-            return None
+        exp = df[df['type'] == 'Expense']
+        inc = df[df['type'] == 'Profit']
 
-        # Pivot Logic
-        expense_df = df[df['type'] == 'Expense']
-        income_df = df[df['type'] == 'Profit']
+        p_exp = exp.pivot_table(index='date', columns='category', values='amount', aggfunc='sum', fill_value=0) if not exp.empty else pd.DataFrame(columns=['Total Expense'])
+        if not exp.empty: p_exp['Total Expense'] = p_exp.sum(axis=1)
 
-        if not expense_df.empty:
-            pivot_expense = expense_df.pivot_table(index='date', columns='category', values='amount', aggfunc='sum', fill_value=0)
-            pivot_expense['Total Expense'] = pivot_expense.sum(axis=1)
-        else:
-            pivot_expense = pd.DataFrame(columns=['Total Expense'])
+        p_inc = inc.pivot_table(index='date', columns='category', values='amount', aggfunc='sum', fill_value=0) if not inc.empty else pd.DataFrame(columns=['Total Income'])
+        if not inc.empty: p_inc['Total Income'] = p_inc.sum(axis=1)
 
-        if not income_df.empty:
-            pivot_income = income_df.pivot_table(index='date', columns='category', values='amount', aggfunc='sum', fill_value=0)
-            pivot_income['Total Income'] = pivot_income.sum(axis=1)
-        else:
-            pivot_income = pd.DataFrame(columns=['Total Income'])
-
-        # Merge
-        final_df = pd.concat([pivot_expense, pivot_income], axis=1).fillna(0)
-        
-        # Calculate Margin
-        total_inc = final_df['Total Income'] if 'Total Income' in final_df else 0
-        total_exp = final_df['Total Expense'] if 'Total Expense' in final_df else 0
-        final_df['Net Margin'] = total_inc - total_exp
-        
-        return final_df
+        final = pd.concat([p_exp, p_inc], axis=1).fillna(0)
+        final['Net Margin'] = (final['Total Income'] if 'Total Income' in final else 0) - (final['Total Expense'] if 'Total Expense' in final else 0)
+        return final
 
     def save_report_to_excel(self, df, year, month):
-        """Saves a given DataFrame to Excel."""
         filename = f"Monthly_Report_{year}_{month:02d}.xlsx"
         with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Daily Summary')
-            worksheet = writer.sheets['Daily Summary']
-            for column_cells in worksheet.columns:
-                length = max(len(str(cell.value)) for cell in column_cells)
-                worksheet.column_dimensions[column_cells[0].column_letter].width = length + 2
+            df.to_excel(writer, sheet_name='Summary')
         return filename
-    
-    # --- NEW: Drill-Down Logic ---
-    def fetch_transactions_for_cell(self, date_str, category):
-        """
-        Used when a user clicks a cell in the report preview.
-        Returns detailed rows that make up that aggregated sum.
-        """
-        query = """
-            SELECT id, time, amount, type 
-            FROM transactions 
-            WHERE date = ? AND category = ?
-        """
-        self.cursor.execute(query, (date_str, category))
+
+    def fetch_transactions_for_cell(self, date, cat):
+        self.cursor.execute("SELECT id, time, amount, type FROM transactions WHERE date = ? AND category = ?", (date, cat))
         return self.cursor.fetchall()
 
     def close(self):
