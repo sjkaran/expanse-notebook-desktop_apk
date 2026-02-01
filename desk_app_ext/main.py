@@ -4,6 +4,9 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from backend import BackendManager
+import os
+import ctypes
+
 
 # --- System Configuration ---
 ctk.set_appearance_mode("Dark")
@@ -21,6 +24,14 @@ class BusinessTrackerApp(ctk.CTk):
 
         self.title("Visionary Business Suite v4.2")
         self.geometry("1280x850")
+
+        icon_path = os.path.join(os.path.dirname(__file__),"icon.ico")
+
+        #setting window icon
+        try: 
+            self.iconbitmap(default=icon_path)
+        except Exception as e:
+            print(f"Warning: Could not load icon. {e}")
         
         # --- Layout Grid ---
         self.grid_columnconfigure(1, weight=1)

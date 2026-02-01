@@ -1,10 +1,45 @@
+# --- Python Basics ---
 __pycache__/
+*.py[cod]
+*$py.class
 
-#for further verants
-mobapk/
+# --- Virtual Environments ---
+# It is best practice not to commit your virtual environment
+venv/
+env/
+.venv/
 
-#practicing model
-pr/
+# --- IDE Settings ---
+.vscode/
+.idea/
 
-'rough.py'
+# --- Database (CRITICAL) ---
+# Never push your actual financial records!
+*.db
+*.sqlite3
+business_data.db
 
+# --- Application Specific Data ---
+# Ignore the generated Excel reports
+*.xlsx
+Monthly_Report_*.xlsx
+
+# Ignore Backups created by the app
+Backup_BusinessData_*.db
+
+# --- PyInstaller / Build Artifacts ---
+# You don't need to push the temporary build folders
+build/
+dist/
+*.spec
+
+# --- OS Generated Files ---
+.DS_Store
+Thumbs.db
+
+# --- Notes ---
+# DO NOT ignore:
+# main.py
+# backend.py
+# icon.ico (You need this for the build!)
+# requirements.txt (You should create this)
