@@ -106,8 +106,9 @@ class BusinessTrackerApp(ctk.CTk):
             self.frames["page1"].refresh()
 
     def on_closing(self):
-        self.backend.close()
-        self.destroy()
+        self.backend.close()  # 1. Save and close the database safely
+        self.quit()           # 2. Stop the background scaling timers
+        self.destroy()        # 3. Now actually destroy the window
 
 # --- PAGE 1: TRANSACTION DASHBOARD ---
 class TransactionPage(ctk.CTkFrame):
@@ -354,11 +355,27 @@ class ReportsPage(ctk.CTkFrame):
 
     def dl(self):
         if self.current_df is not None:
-            y, m = map(int, self.cur_ym.split('-'))
+            # 1. Suggest a filename based on the selected month
+            suggested_name = f"Monthly_Report_{self.cur_ym}.xlsx"
+            
+            # 2. Open the "Save As" Dialog
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx")],
+                initialfile=suggested_name,
+                title="Save Report As"
+            )
+            
+            # 3. If user clicked "Cancel", stop
+            if not file_path:
+                return
+
+            # 4. Save to the chosen path
             try:
-                fn = self.controller.backend.save_report_to_excel(self.current_df, y, m)
-                messagebox.showinfo("Success", f"File saved:\n{fn}")
-            except Exception as e: messagebox.showerror("Error", str(e))
+                fn = self.controller.backend.save_report_to_excel(self.current_df, file_path)
+                messagebox.showinfo("Success", f"Report saved successfully at:\n{fn}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save file:\n{str(e)}")
 
 # --- PAGE 3: VISUALS ---
 class VisualsPage(ctk.CTkFrame):

@@ -160,11 +160,22 @@ class BackendManager:
         final['Net Margin'] = (final['Total Income'] if 'Total Income' in final else 0) - (final['Total Expense'] if 'Total Expense' in final else 0)
         return final
 
-    def save_report_to_excel(self, df, year, month):
-        filename = f"Monthly_Report_{year}_{month:02d}.xlsx"
-        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Summary')
-        return filename
+    def save_report_to_excel(self, df, file_path):
+        """
+        Saves the dataframe to the specific path chosen by the user.
+        """
+        try:
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Summary')
+                
+                # Auto-adjust column widths
+                worksheet = writer.sheets['Summary']
+                for column_cells in worksheet.columns:
+                    length = max(len(str(cell.value)) for cell in column_cells)
+                    worksheet.column_dimensions[column_cells[0].column_letter].width = length + 2
+            return file_path
+        except Exception as e:
+            raise e
 
     def fetch_transactions_for_cell(self, date, cat):
         self.cursor.execute("SELECT id, time, amount, type FROM transactions WHERE date = ? AND category = ?", (date, cat))
