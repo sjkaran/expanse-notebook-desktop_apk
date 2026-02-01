@@ -189,11 +189,141 @@ class TransactionPage(ctk.CTkFrame):
 
 class ReportsPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
-        super().__init__(parent)
-        self.label = ctk.CTkLabel(self, text="Financial Reports (Excel)", font=ctk.CTkFont(size=24, weight="bold"))
-        self.label.pack(pady=20)
-        self.info_label = ctk.CTkLabel(self, text="Export history and monthly summaries below.")
-        self.info_label.pack(pady=10)
+        super().__init__(parent, fg_color="transparent")
+        self.controller = controller
+        self.current_report_df = None # Store data here for saving later
+        self.selected_year_month = None
+
+        # --- Header ---
+        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.header_frame.pack(fill="x", padx=30, pady=20)
+        
+        self.label = ctk.CTkLabel(self.header_frame, text="Monthly Reports & Analytics", font=("Georgia", 28, "bold"))
+        self.label.pack(side="left")
+
+        # --- Control Bar ---
+        self.control_frame = ctk.CTkFrame(self, fg_color="#333", height=60)
+        self.control_frame.pack(fill="x", padx=30, pady=(0, 20))
+
+        ctk.CTkLabel(self.control_frame, text="Select Month:", font=("Arial", 14)).pack(side="left", padx=20, pady=10)
+        
+        self.month_dropdown = ctk.CTkOptionMenu(
+            self.control_frame, values=["No Data"], width=180,
+            font=("Arial", 14), command=self.on_month_select
+        )
+        self.month_dropdown.pack(side="left", padx=10, pady=10)
+
+        self.preview_btn = ctk.CTkButton(
+            self.control_frame, text="Load Preview", 
+            font=("Helvetica", 14, "bold"), fg_color="#3498db", hover_color="#2980b9",
+            command=self.load_preview
+        )
+        self.preview_btn.pack(side="left", padx=20, pady=10)
+
+        self.download_btn = ctk.CTkButton(
+            self.control_frame, text="Download Excel", 
+            font=("Helvetica", 14, "bold"), fg_color="#27ae60", hover_color="#2ecc71",
+            state="disabled", command=self.download_excel
+        )
+        self.download_btn.pack(side="right", padx=20, pady=10)
+
+        # --- Preview Table Area ---
+        self.preview_label = ctk.CTkLabel(self, text="Report Preview (First 50 rows)", font=("Arial", 14, "italic"), text_color="gray")
+        self.preview_label.pack(padx=30, anchor="w")
+
+        # Container for the grid
+        self.table_container = ctk.CTkScrollableFrame(self, fg_color="#2b2b2b")
+        self.table_container.pack(padx=30, pady=10, fill="both", expand=True)
+
+    def refresh_status(self):
+        """Called when switching to this tab. Updates month list."""
+        months = self.controller.backend.get_available_months()
+        if months:
+            self.month_dropdown.configure(values=months)
+            self.month_dropdown.set(months[0])
+            self.selected_year_month = months[0]
+        else:
+            self.month_dropdown.configure(values=["No Data"])
+            self.month_dropdown.set("No Data")
+            self.selected_year_month = None
+
+    def on_month_select(self, choice):
+        self.selected_year_month = choice
+        # Reset buttons when selection changes
+        self.download_btn.configure(state="disabled")
+        # Clear previous table
+        for widget in self.table_container.winfo_children():
+            widget.destroy()
+
+    def load_preview(self):
+        if not self.selected_year_month or self.selected_year_month == "No Data":
+            messagebox.showwarning("Warning", "No data available to load.")
+            return
+
+        # Parse "YYYY-MM"
+        year, month = map(int, self.selected_year_month.split('-'))
+        
+        # Fetch DataFrame from Backend
+        df = self.controller.backend.get_monthly_pivot_data(year, month)
+        
+        if df is None:
+            messagebox.showinfo("Info", "No transactions found for this month.")
+            return
+
+        self.current_report_df = df
+        self.render_preview_table(df)
+        
+        # Enable Download
+        self.download_btn.configure(state="normal")
+
+    def render_preview_table(self, df):
+        # Clear old widgets
+        for widget in self.table_container.winfo_children():
+            widget.destroy()
+
+        # Reset Grid
+        df_reset = df.reset_index() # Make Date a normal column
+        columns = list(df_reset.columns)
+        
+        # 1. Render Headers
+        for col_idx, col_name in enumerate(columns):
+            ctk.CTkLabel(
+                self.table_container, text=str(col_name), 
+                font=("Arial", 12, "bold"), fg_color="#444", corner_radius=4, width=100
+            ).grid(row=0, column=col_idx, padx=2, pady=5, sticky="ew")
+
+        # 2. Render Data Rows
+        # Limit to 50 rows for performance in preview
+        for row_idx, row in enumerate(df_reset.head(50).itertuples(index=False), start=1):
+            for col_idx, value in enumerate(row):
+                # Formatting: If float, show currency
+                display_text = f"{value}"
+                if isinstance(value, (int, float)) and col_idx > 0: # Skip date column for currency
+                    display_text = f"{value:,.0f}" if value == 0 else f"{value:,.2f}"
+                
+                # Highlight "Total" or "Margin" columns
+                bg_color = "transparent"
+                text_color = "white"
+                
+                if "Total Income" in columns[col_idx]: text_color = "#2ecc71"
+                elif "Total Expense" in columns[col_idx]: text_color = "#e74c3c"
+                elif "Net Margin" in columns[col_idx]: text_color = "#3498db"
+
+                ctk.CTkLabel(
+                    self.table_container, text=display_text, 
+                    font=("Consolas", 12), text_color=text_color
+                ).grid(row=row_idx, column=col_idx, padx=5, pady=2)
+
+    def download_excel(self):
+        if self.current_report_df is None:
+            return
+            
+        year, month = map(int, self.selected_year_month.split('-'))
+        try:
+            filename = self.controller.backend.save_report_to_excel(self.current_report_df, year, month)
+            messagebox.showinfo("Success", f"File Downloaded Successfully:\n\n{filename}\n\nCheck your app folder.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save file: {e}")
 
 if __name__ == "__main__":
     app = BusinessTrackerApp()
@@ -210,4 +340,6 @@ if __name__ == "__main__":
 * must have an option to delete or remove a transaction.
 * must not store a transaction with the category of "select category".
 
+* styling: making texts larger.
+* styling: making the colors more high contrasts.
 """
