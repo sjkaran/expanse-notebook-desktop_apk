@@ -261,7 +261,7 @@ class ReportsPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
         self.controller = controller
-        self.current_report_df = None # Store data here for saving later
+        self.current_report_df = None 
         self.selected_year_month = None
 
         # --- Header ---
@@ -298,15 +298,15 @@ class ReportsPage(ctk.CTkFrame):
         self.download_btn.pack(side="right", padx=20, pady=10)
 
         # --- Preview Table Area ---
-        self.preview_label = ctk.CTkLabel(self, text="Report Preview (First 50 rows)", font=("Arial", 14, "italic"), text_color="gray")
-        self.preview_label.pack(padx=30, anchor="w")
+        self.info_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.info_frame.pack(padx=30, fill="x")
+        self.preview_label = ctk.CTkLabel(self.info_frame, text="Preview (Click any amount to edit/delete)", font=("Arial", 14, "italic"), text_color="gray")
+        self.preview_label.pack(side="left")
 
-        # Container for the grid
         self.table_container = ctk.CTkScrollableFrame(self, fg_color="#2b2b2b")
         self.table_container.pack(padx=30, pady=10, fill="both", expand=True)
 
     def refresh_status(self):
-        """Called when switching to this tab. Updates month list."""
         months = self.controller.backend.get_available_months()
         if months:
             self.month_dropdown.configure(values=months)
@@ -319,82 +319,124 @@ class ReportsPage(ctk.CTkFrame):
 
     def on_month_select(self, choice):
         self.selected_year_month = choice
-        # Reset buttons when selection changes
         self.download_btn.configure(state="disabled")
-        # Clear previous table
+        # Clear table immediately on selection change
         for widget in self.table_container.winfo_children():
             widget.destroy()
 
     def load_preview(self):
+        # 1. Clear previous table (Fix for the lingering data bug)
+        for widget in self.table_container.winfo_children():
+            widget.destroy()
+
         if not self.selected_year_month or self.selected_year_month == "No Data":
-            messagebox.showwarning("Warning", "No data available to load.")
+            messagebox.showwarning("Warning", "No data available.")
             return
 
-        # Parse "YYYY-MM"
         year, month = map(int, self.selected_year_month.split('-'))
-        
-        # Fetch DataFrame from Backend
         df = self.controller.backend.get_monthly_pivot_data(year, month)
         
-        if df is None:
-            messagebox.showinfo("Info", "No transactions found for this month.")
+        # 2. Handle Empty Data Correctly
+        if df is None or df.empty:
+            ctk.CTkLabel(self.table_container, text="No transactions found for this month.", font=("Arial", 16)).pack(pady=20)
+            self.download_btn.configure(state="disabled")
             return
 
         self.current_report_df = df
         self.render_preview_table(df)
-        
-        # Enable Download
         self.download_btn.configure(state="normal")
 
     def render_preview_table(self, df):
-        # Clear old widgets
-        for widget in self.table_container.winfo_children():
-            widget.destroy()
-
-        # Reset Grid
-        df_reset = df.reset_index() # Make Date a normal column
+        df_reset = df.reset_index()
         columns = list(df_reset.columns)
         
-        # 1. Render Headers
+        # Headers
         for col_idx, col_name in enumerate(columns):
             ctk.CTkLabel(
                 self.table_container, text=str(col_name), 
                 font=("Arial", 12, "bold"), fg_color="#444", corner_radius=4, width=100
             ).grid(row=0, column=col_idx, padx=2, pady=5, sticky="ew")
 
-        # 2. Render Data Rows
-        # Limit to 50 rows for performance in preview
-        for row_idx, row in enumerate(df_reset.head(50).itertuples(index=False), start=1):
-            for col_idx, value in enumerate(row):
-                # Formatting: If float, show currency
-                display_text = f"{value}"
-                if isinstance(value, (int, float)) and col_idx > 0: # Skip date column for currency
-                    display_text = f"{value:,.0f}" if value == 0 else f"{value:,.2f}"
-                
-                # Highlight "Total" or "Margin" columns
-                bg_color = "transparent"
-                text_color = "white"
-                
-                if "Total Income" in columns[col_idx]: text_color = "#2ecc71"
-                elif "Total Expense" in columns[col_idx]: text_color = "#e74c3c"
-                elif "Net Margin" in columns[col_idx]: text_color = "#3498db"
+        # Data Rows
+        for row_idx, row in enumerate(df_reset.itertuples(index=False), start=1):
+            row_date = row[0] 
 
-                ctk.CTkLabel(
+            for col_idx, value in enumerate(row):
+                # Formatting
+                display_text = f"{value}"
+                is_amount = False
+                if isinstance(value, (int, float)) and col_idx > 0:
+                    display_text = f"{value:,.0f}" if value == 0 else f"{value:,.2f}"
+                    is_amount = True
+                
+                # Colors
+                text_color = "white"
+                col_name = columns[col_idx]
+                if "Total Income" in col_name: text_color = "#2ecc71"
+                elif "Total Expense" in col_name: text_color = "#e74c3c"
+                elif "Net Margin" in col_name: text_color = "#3498db"
+
+                label = ctk.CTkLabel(
                     self.table_container, text=display_text, 
                     font=("Consolas", 12), text_color=text_color
-                ).grid(row=row_idx, column=col_idx, padx=5, pady=2)
+                )
+                label.grid(row=row_idx, column=col_idx, padx=5, pady=2)
+
+                # Clickable Logic
+                if is_amount and value != 0 and "Total" not in col_name and "Margin" not in col_name:
+                    label.bind("<Enter>", lambda e, l=label: l.configure(text_color="#f1c40f", font=("Consolas", 12, "underline")))
+                    label.bind("<Leave>", lambda e, l=label, c=text_color: l.configure(text_color=c, font=("Consolas", 12)))
+                    label.bind("<Button-1>", lambda event, d=row_date, c=col_name: self.open_drill_down(d, c))
+
+    def open_drill_down(self, date_str, category):
+        toplevel = ctk.CTkToplevel(self)
+        toplevel.title(f"Edit: {category}")
+        toplevel.geometry("500x400")
+        toplevel.transient(self) 
+        toplevel.grab_set()
+
+        ctk.CTkLabel(toplevel, text=f"{category} ({date_str})", font=("Georgia", 20, "bold")).pack(pady=15)
+        
+        scroll = ctk.CTkScrollableFrame(toplevel)
+        scroll.pack(fill="both", expand=True, padx=20, pady=10)
+
+        txns = self.controller.backend.fetch_transactions_for_cell(date_str, category)
+        
+        if not txns:
+            ctk.CTkLabel(scroll, text="No records found.").pack(pady=20)
+            return
+
+        for txn in txns:
+            tid, time, amount, t_type = txn
+            row = ctk.CTkFrame(scroll, fg_color="#333")
+            row.pack(fill="x", pady=2)
+            
+            ctk.CTkLabel(row, text=f"{time}", width=60).pack(side="left", padx=5)
+            ctk.CTkLabel(row, text=f"₹{amount:,.2f}", width=100, font=("Arial", 14, "bold")).pack(side="left", padx=5)
+            
+            ctk.CTkButton(
+                row, text="Delete", width=60, fg_color="#c0392b", hover_color="#e74c3c",
+                command=lambda i=tid, w=toplevel: self.delete_and_refresh(i, w)
+            ).pack(side="right", padx=10, pady=5)
+
+    def delete_and_refresh(self, txn_id, window):
+        if messagebox.askyesno("Confirm", "Delete this transaction?"):
+            self.controller.backend.delete_transaction(txn_id)
+            window.destroy()
+            # Force UI update so the "deleted" entry vanishes instantly
+            self.load_preview() 
+            messagebox.showinfo("Success", "Transaction deleted.")
 
     def download_excel(self):
-        if self.current_report_df is None:
-            return
-            
+        if self.current_report_df is None: return
         year, month = map(int, self.selected_year_month.split('-'))
         try:
             filename = self.controller.backend.save_report_to_excel(self.current_report_df, year, month)
-            messagebox.showinfo("Success", f"File Downloaded Successfully:\n\n{filename}\n\nCheck your app folder.")
+            messagebox.showinfo("Success", f"File Downloaded Successfully:\n\n{filename}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save file: {e}")
 
+            
 if __name__ == "__main__":
     app = BusinessTrackerApp()
     try:

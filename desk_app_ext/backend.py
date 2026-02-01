@@ -119,6 +119,20 @@ class BackendManager:
                 length = max(len(str(cell.value)) for cell in column_cells)
                 worksheet.column_dimensions[column_cells[0].column_letter].width = length + 2
         return filename
+    
+    # --- NEW: Drill-Down Logic ---
+    def fetch_transactions_for_cell(self, date_str, category):
+        """
+        Used when a user clicks a cell in the report preview.
+        Returns detailed rows that make up that aggregated sum.
+        """
+        query = """
+            SELECT id, time, amount, type 
+            FROM transactions 
+            WHERE date = ? AND category = ?
+        """
+        self.cursor.execute(query, (date_str, category))
+        return self.cursor.fetchall()
 
     def close(self):
         self.conn.close()
