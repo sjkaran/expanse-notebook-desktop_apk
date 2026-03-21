@@ -3,6 +3,14 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+#unwanted folders (test folders)
+pr/
+mobapk/
+
+#icon folders
+icons/
+
+
 # --- Virtual Environments ---
 # It is best practice not to commit your virtual environment
 venv/
