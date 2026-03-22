@@ -1,5 +1,4 @@
 import sqlite3
-import pandas as pd
 import shutil
 from datetime import datetime
 import os
@@ -71,6 +70,7 @@ class BackendManager:
         self.conn.commit()
 
     def fetch_today_transactions(self, date_str):
+        import pandas as pd
         self.cursor.execute("SELECT * FROM transactions WHERE date = ?", (date_str,))
         return self.cursor.fetchall()
 
@@ -90,6 +90,7 @@ class BackendManager:
         return dict(self.cursor.fetchall())
 
     def fetch_daily_trends(self, year, month):
+        import pandas as pd
         """Returns DataFrame of Daily Income vs Expense for Bar Charts."""
         date_pattern = f"{year}-{month:02d}%"
         query = f"SELECT date, type, amount FROM transactions WHERE date LIKE '{date_pattern}'"
@@ -141,6 +142,7 @@ class BackendManager:
         return [row[0] for row in self.cursor.fetchall() if row[0]]
 
     def get_monthly_pivot_data(self, year, month):
+        import pandas as pd
         # (Same logic as before - abbreviated for brevity, but needed)
         date_pattern = f"{year}-{month:02d}%"
         query = f"SELECT date, type, category, amount FROM transactions WHERE date LIKE '{date_pattern}'"
@@ -161,6 +163,7 @@ class BackendManager:
         return final
 
     def save_report_to_excel(self, df, file_path):
+        import pandas as pd
         """
         Saves the dataframe to the specific path chosen by the user.
         """

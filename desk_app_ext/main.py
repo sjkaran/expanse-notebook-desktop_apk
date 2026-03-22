@@ -1,8 +1,6 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 from datetime import datetime
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from backend import BackendManager
 import os
 import ctypes
@@ -416,6 +414,7 @@ class VisualsPage(ctk.CTkFrame):
             self.menu.set("No Data")
 
     def load_charts(self, val):
+        import matplotlib.pyplot as plt
         for w in self.chart_area.winfo_children(): w.destroy()
         if val == "No Data" or not val: return
         
@@ -450,6 +449,7 @@ class VisualsPage(ctk.CTkFrame):
             self.embed_chart(fig2)
 
     def embed_chart(self, fig):
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
         canvas = FigureCanvasTkAgg(fig, master=self.chart_area)
         canvas.draw()
         canvas.get_tk_widget().pack(pady=30)
