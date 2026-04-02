@@ -82,8 +82,32 @@ class BackendManager:
     def get_categories(self, t_type):
         self.cursor.execute("SELECT name FROM categories WHERE type = ?", (t_type,))
         return [row[0] for row in self.cursor.fetchall()]
+    
 
     # --- Analytics Engine (Track A) ---
+    def fetch_revenue_distribution(self, year, month):
+        """Calculates total sales, expenses, and remaining profit for the Distribution Chart."""
+        date_pattern = f"{year}-{month:02d}%"
+        
+        # 1. Get Total Incoming Sales (Profit type)
+        self.cursor.execute("SELECT SUM(amount) FROM transactions WHERE date LIKE ? AND type = 'Profit'", (date_pattern,))
+        total_income = self.cursor.fetchone()[0] or 0
+        
+        # 2. Get All Expenses grouped by Category
+        self.cursor.execute("SELECT category, SUM(amount) FROM transactions WHERE date LIKE ? AND type = 'Expense' GROUP BY category", (date_pattern,))
+        expenses = dict(self.cursor.fetchall())
+        
+        total_expense = sum(expenses.values())
+        remaining = total_income - total_expense
+        
+        # 3. Build the Distribution Dictionary
+        dist = expenses.copy()
+        if remaining > 0:
+            dist['Net Profit (Remaining)'] = remaining
+            
+        return dist, total_income, remaining
+    
+
     def fetch_category_breakdown(self, year, month, t_type):
         """Returns {'Category': Amount} for Pie Charts."""
         date_pattern = f"{year}-{month:02d}%"

@@ -541,18 +541,27 @@ class ReportsPage(ctk.CTkFrame):
 
 
 # --- PAGE 3: VISUALS ---
+# --- PAGE 3: VISUALS (Upgraded with Zoom & Revenue Distribution) ---
 class VisualsPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
         self.controller = controller
         
+        # NEW: State variable for the toggle button
+        self.show_pct = True 
+        
         ctk.CTkLabel(self, text="Visual Analytics", font=("Georgia", 32, "bold")).pack(pady=(30, 20))
         
         self.ctrl = ctk.CTkFrame(self, fg_color="transparent")
         self.ctrl.pack(fill="x", padx=40)
-        ctk.CTkLabel(self.ctrl, text="Select Month for Analysis:", font=("Arial", 14)).pack(side="left")
-        self.menu = ctk.CTkOptionMenu(self.ctrl, values=["No Data"], command=self.load_charts, width=200)
-        self.menu.pack(side="left", padx=20)
+        
+        ctk.CTkLabel(self.ctrl, text="Select Month:", font=("Arial", 14)).pack(side="left")
+        self.menu = ctk.CTkOptionMenu(self.ctrl, values=["No Data"], command=self.load_charts, width=180)
+        self.menu.pack(side="left", padx=15)
+        
+        # NEW: The Percentage vs Numbers Toggle Button
+        self.btn_toggle = ctk.CTkButton(self.ctrl, text="Showing: Percentages (%)", width=200, fg_color="#8e44ad", hover_color="#9b59b6", font=("Arial", 14, "bold"), command=self.toggle_labels)
+        self.btn_toggle.pack(side="left", padx=20)
         
         self.chart_area = ctk.CTkScrollableFrame(self, fg_color="#2b2b2b")
         self.chart_area.pack(fill="both", expand=True, padx=40, pady=20)
@@ -567,6 +576,25 @@ class VisualsPage(ctk.CTkFrame):
             self.menu.configure(values=["No Data"])
             self.menu.set("No Data")
 
+    def toggle_labels(self):
+        # Flips the state and updates the button text
+        self.show_pct = not self.show_pct
+        txt = "Showing: Percentages (%)" if self.show_pct else f"Showing: Numbers ({self.controller.currency_symbol})"
+        self.btn_toggle.configure(text=txt)
+        
+        # Re-render the charts instantly with new labels
+        self.load_charts(self.menu.get())
+
+    def make_autopct(self, values):
+        """Dynamic label formatter based on the toggle state."""
+        def my_autopct(pct):
+            total = sum(values)
+            val = pct * total / 100.0
+            sym = self.controller.currency_symbol
+            # Show % or formatted Currency with commas
+            return f"{pct:.1f}%" if self.show_pct else f"{sym}{val:,.0f}"
+        return my_autopct
+
     def load_charts(self, val):
         import matplotlib.pyplot as plt
         for w in self.chart_area.winfo_children(): w.destroy()
@@ -574,17 +602,38 @@ class VisualsPage(ctk.CTkFrame):
         
         y, m = map(int, val.split('-'))
         
-        # Pie Chart
+        # --- CHART 1: Standard Expense Breakdown ---
         exp_data = self.controller.backend.fetch_category_breakdown(y, m, "Expense")
         if exp_data:
             fig, ax = plt.subplots(figsize=(7, 5), facecolor='#2b2b2b')
-            wedges, texts, autotexts = ax.pie(exp_data.values(), labels=exp_data.keys(), autopct='%1.1f%%', startangle=90, textprops={'color':"white"})
-            for t in texts: t.set_color("white")
+            wedges, texts, autotexts = ax.pie(
+                exp_data.values(), labels=exp_data.keys(), 
+                autopct=self.make_autopct(exp_data.values()), # Dynamic labels
+                startangle=90, textprops={'color':"white"}
+            )
             for t in autotexts: t.set_color("black")
-            ax.set_title("Expense Breakdown", color="white", fontsize=14, pad=20)
+            ax.set_title("Operational Expense Breakdown", color="white", fontsize=14, pad=20)
             self.embed_chart(fig)
 
-        # Bar Chart
+        # --- CHART 2: NEW Revenue Distribution ---
+        rev_data, tot_inc, remaining = self.controller.backend.fetch_revenue_distribution(y, m)
+        if rev_data and tot_inc > 0:
+            fig_rev, ax_rev = plt.subplots(figsize=(7, 5), facecolor='#2b2b2b')
+            
+            # Emphasize (explode) the Net Profit slice if it exists
+            explode = [0.1 if k == 'Net Profit (Remaining)' else 0 for k in rev_data.keys()]
+            
+            wedges2, texts2, autotexts2 = ax_rev.pie(
+                rev_data.values(), labels=rev_data.keys(), 
+                autopct=self.make_autopct(rev_data.values()), 
+                startangle=140, textprops={'color':"white"}, explode=explode
+            )
+            for t in autotexts2: t.set_color("black")
+            
+            ax_rev.set_title(f"Revenue Distribution (Total Sales: {self.controller.currency_symbol}{tot_inc:,.2f})", color="white", fontsize=14, pad=20)
+            self.embed_chart(fig_rev)
+
+        # --- CHART 3: Daily Cash Flow (Bar Chart) ---
         trend_df = self.controller.backend.fetch_daily_trends(y, m)
         if trend_df is not None:
             fig2, ax2 = plt.subplots(figsize=(9, 5), facecolor='#2b2b2b')
@@ -599,14 +648,32 @@ class VisualsPage(ctk.CTkFrame):
             ax2.tick_params(axis='y', colors='white')
             for spine in ax2.spines.values(): spine.set_color('#555')
             ax2.legend(facecolor='#333', labelcolor='white')
-            ax2.set_title("Daily Cash Flow", color="white", fontsize=14, pad=20)
+            ax2.set_title("Daily Cash Flow Tracker", color="white", fontsize=14, pad=20)
             self.embed_chart(fig2)
 
     def embed_chart(self, fig):
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        canvas = FigureCanvasTkAgg(fig, master=self.chart_area)
+        # NEW: Importing the native matplotlib toolbar
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        
+        # A stylish wrapper box to hold both the graph and its tools
+        wrapper = ctk.CTkFrame(self.chart_area, fg_color="#1a1a1a", border_width=1, border_color="#444")
+        wrapper.pack(pady=20, fill="x", padx=20)
+        
+        # Embed the Graph
+        canvas = FigureCanvasTkAgg(fig, master=wrapper)
         canvas.draw()
-        canvas.get_tk_widget().pack(pady=30)
+        canvas.get_tk_widget().pack(fill="both", expand=True, pady=(10, 0))
+        
+        # Embed the Matplotlib Interactive Toolbar (Zoom, Pan, Save)
+        toolbar_frame = ctk.CTkFrame(wrapper, fg_color="transparent")
+        toolbar_frame.pack(fill="x", pady=(5, 10))
+        
+        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+        toolbar.update()
+        # Matplotlib toolbars have a default Tkinter style, we pack it cleanly below the chart
+        toolbar.pack(side="bottom")
+
+
 
 # --- PAGE 4: SETTINGS (Updated with Business Name) ---
 # --- PAGE 4: SETTINGS (Upgraded with Danger Zone) ---
