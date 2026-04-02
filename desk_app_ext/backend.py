@@ -69,6 +69,11 @@ class BackendManager:
         self.cursor.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
         self.conn.commit()
 
+    def update_transaction_amount(self, txn_id, new_amount):
+        """Updates the amount of an existing transaction."""
+        self.cursor.execute("UPDATE transactions SET amount = ? WHERE id = ?", (new_amount, txn_id))
+        self.conn.commit()
+
     def fetch_today_transactions(self, date_str):
         import pandas as pd
         self.cursor.execute("SELECT * FROM transactions WHERE date = ?", (date_str,))

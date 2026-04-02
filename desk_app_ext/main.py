@@ -341,16 +341,18 @@ class TransactionPage(ctk.CTkFrame):
             self.controller.backend.delete_transaction(tid)
             self.refresh()
 
-# --- PAGE 2: REPORTS ---
+# --- PAGE 2: REPORTS (Upgraded with 2D Scroll, Zoom, Totals, and Edit) ---
 class ReportsPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
         self.controller = controller
         self.current_df = None
         self.cur_ym = None
+        self.zoom_level = 12 # Default font size
         
         ctk.CTkLabel(self, text="Monthly Reports & Analytics", font=("Georgia", 32, "bold")).pack(pady=(30, 20))
         
+        # --- Control Bar ---
         self.ctrl = ctk.CTkFrame(self, fg_color="#333", height=60)
         self.ctrl.pack(fill="x", padx=40, pady=(0, 20))
         
@@ -358,12 +360,37 @@ class ReportsPage(ctk.CTkFrame):
         self.menu = ctk.CTkOptionMenu(self.ctrl, values=["No Data"], command=self.on_sel, width=180)
         self.menu.pack(side="left", padx=10, pady=15)
         
-        ctk.CTkButton(self.ctrl, text="Load Preview", font=("Arial", 14, "bold"), fg_color="#3498db", width=150, command=self.load).pack(side="left", padx=20)
-        self.dl_btn = ctk.CTkButton(self.ctrl, text="Download Excel", font=("Arial", 14, "bold"), fg_color="#27ae60", state="disabled", width=150, command=self.dl)
-        self.dl_btn.pack(side="right", padx=20)
+        ctk.CTkButton(self.ctrl, text="Load Preview", font=("Arial", 14, "bold"), fg_color="#3498db", width=120, command=self.load).pack(side="left", padx=20)
         
-        self.scroll = ctk.CTkScrollableFrame(self, fg_color="#2b2b2b")
-        self.scroll.pack(fill="both", expand=True, padx=40, pady=10)
+        # Zoom Controls
+        self.btn_zoom_in = ctk.CTkButton(self.ctrl, text="+", width=40, font=("Arial", 16, "bold"), command=self.zoom_in)
+        self.btn_zoom_in.pack(side="right", padx=10)
+        self.btn_zoom_out = ctk.CTkButton(self.ctrl, text="-", width=40, font=("Arial", 16, "bold"), command=self.zoom_out)
+        self.btn_zoom_out.pack(side="right", padx=5)
+        ctk.CTkLabel(self.ctrl, text="Zoom:", font=("Arial", 14)).pack(side="right", padx=5)
+
+        self.dl_btn = ctk.CTkButton(self.ctrl, text="Download Excel", font=("Arial", 14, "bold"), fg_color="#27ae60", state="disabled", width=150, command=self.dl)
+        self.dl_btn.pack(side="right", padx=30)
+        
+        # --- 2D Scrollable Table Setup ---
+        self.table_container = ctk.CTkFrame(self, fg_color="#2b2b2b")
+        self.table_container.pack(fill="both", expand=True, padx=40, pady=10)
+
+        # Using CTkCanvas and dual scrollbars for true 2D scrolling
+        self.canvas = ctk.CTkCanvas(self.table_container, bg="#2b2b2b", highlightthickness=0)
+        self.v_scroll = ctk.CTkScrollbar(self.table_container, orientation="vertical", command=self.canvas.yview)
+        self.h_scroll = ctk.CTkScrollbar(self.table_container, orientation="horizontal", command=self.canvas.xview)
+
+        self.canvas.configure(yscrollcommand=self.v_scroll.set, xscrollcommand=self.h_scroll.set)
+
+        self.v_scroll.pack(side="right", fill="y")
+        self.h_scroll.pack(side="bottom", fill="x")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        self.scroll = ctk.CTkFrame(self.canvas, fg_color="#2b2b2b")
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scroll, anchor="nw")
+
+        self.scroll.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
 
     def refresh(self):
         ms = self.controller.backend.get_available_months()
@@ -379,50 +406,89 @@ class ReportsPage(ctk.CTkFrame):
         self.cur_ym = c
         for w in self.scroll.winfo_children(): w.destroy()
         self.dl_btn.configure(state="disabled")
+
+    def zoom_in(self):
+        if self.zoom_level < 24: # Max zoom
+            self.zoom_level += 2
+            if self.current_df is not None: self.render_table()
+
+    def zoom_out(self):
+        if self.zoom_level > 8: # Min zoom
+            self.zoom_level -= 2
+            if self.current_df is not None: self.render_table()
     
     def load(self):
-        for w in self.scroll.winfo_children(): w.destroy()
         if not self.cur_ym or self.cur_ym == "No Data": return
         y, m = map(int, self.cur_ym.split('-'))
         df = self.controller.backend.get_monthly_pivot_data(y, m)
+        self.current_df = df
+        self.render_table()
+
+    def render_table(self):
+        for w in self.scroll.winfo_children(): w.destroy()
+        df = self.current_df
+
         if df is None or df.empty: 
             ctk.CTkLabel(self.scroll, text="No Data Available", font=("Arial", 16)).pack(pady=20)
+            self.dl_btn.configure(state="disabled")
             return
         
-        self.current_df = df
         self.dl_btn.configure(state="normal")
-        
         cols = list(df.reset_index().columns)
-        for i, c in enumerate(cols):
-            ctk.CTkLabel(self.scroll, text=str(c), font=("Arial",12,"bold"), fg_color="#444", width=100, corner_radius=4).grid(row=0, column=i, padx=2, pady=5, sticky="ew")
         
+        # Track column totals for the bottom row
+        col_totals = {col: 0 for col in cols[1:]}
+
+        # 1. Render Headers
+        for i, c in enumerate(cols):
+            ctk.CTkLabel(self.scroll, text=str(c), font=("Arial", self.zoom_level, "bold"), fg_color="#444", corner_radius=4).grid(row=0, column=i, padx=5, pady=5, sticky="ew")
+        
+        # 2. Render Data Rows
         for r_idx, row in enumerate(df.reset_index().itertuples(index=False), 1):
             date_val = row[0]
             for c_idx, val in enumerate(row):
-                if isinstance(val, (int, float)) and c_idx > 0:
+                col_name = cols[c_idx]
+
+                if c_idx > 0:
+                    col_totals[col_name] += val # Add to bottom row total
                     txt = f"{val:,.0f}" if val == 0 else f"{val:,.2f}"
                 else:
                     txt = str(val)
                 
                 fg = "white"
-                col_name = cols[c_idx]
                 if "Total Income" in col_name: fg = "#2ecc71"
                 elif "Total Expense" in col_name: fg = "#e74c3c"
                 elif "Margin" in col_name: fg = "#3498db"
 
-                lbl = ctk.CTkLabel(self.scroll, text=txt, font=("Consolas",12), text_color=fg)
-                lbl.grid(row=r_idx, column=c_idx, padx=5, pady=2)
+                lbl = ctk.CTkLabel(self.scroll, text=txt, font=("Consolas", self.zoom_level), text_color=fg)
+                lbl.grid(row=r_idx, column=c_idx, padx=10, pady=2)
                 
+                # Interactive Cell (Hover & Click)
                 if isinstance(val, (int,float)) and val!=0 and c_idx>0:
                     if "Total" not in col_name and "Margin" not in col_name:
-                        lbl.bind("<Enter>", lambda e, l=lbl: l.configure(text_color="#f1c40f", font=("Consolas", 12, "underline")))
-                        lbl.bind("<Leave>", lambda e, l=lbl, c=fg: l.configure(text_color=c, font=("Consolas", 12)))
+                        lbl.bind("<Enter>", lambda e, l=lbl: l.configure(text_color="#f1c40f", font=("Consolas", self.zoom_level, "underline")))
+                        lbl.bind("<Leave>", lambda e, l=lbl, c=fg: l.configure(text_color=c, font=("Consolas", self.zoom_level)))
                         lbl.bind("<Button-1>", lambda e, d=date_val, c=col_name: self.popup(d,c))
+
+        # 3. Render Grand Total Row at the bottom
+        last_row = len(df) + 1
+        ctk.CTkLabel(self.scroll, text="GRAND TOTAL", font=("Arial", self.zoom_level, "bold"), text_color="#f1c40f").grid(row=last_row, column=0, padx=10, pady=15)
+
+        for c_idx, col_name in enumerate(cols[1:], 1):
+            val = col_totals[col_name]
+            txt = f"{val:,.0f}" if val == 0 else f"{val:,.2f}"
+            
+            fg = "#f1c40f" # Default total color
+            if "Total Income" in col_name: fg = "#2ecc71"
+            elif "Total Expense" in col_name: fg = "#e74c3c"
+            elif "Margin" in col_name: fg = "#3498db"
+
+            ctk.CTkLabel(self.scroll, text=txt, font=("Consolas", self.zoom_level, "bold"), text_color=fg).grid(row=last_row, column=c_idx, padx=10, pady=15)
 
     def popup(self, d, c):
         top = ctk.CTkToplevel(self)
         top.title(f"Details: {c}")
-        top.geometry("400x350")
+        top.geometry("450x350")
         top.transient(self)
         top.grab_set()
         
@@ -437,38 +503,43 @@ class ReportsPage(ctk.CTkFrame):
             r.pack(fill="x", pady=2)
             ctk.CTkLabel(r, text=tim, width=60).pack(side="left", padx=5)
             ctk.CTkLabel(r, text=f"{amt:,.2f}", font=("Arial",14,"bold")).pack(side="left", padx=5)
-            ctk.CTkButton(r, text="Delete", fg_color="#c0392b", width=60, command=lambda i=tid, w=top: self.del_refresh(i,w)).pack(side="right", padx=5, pady=5)
+            
+            # Action Buttons: Edit and Delete
+            ctk.CTkButton(r, text="Delete", fg_color="#c0392b", hover_color="#922b21", width=60, command=lambda i=tid, w=top: self.del_refresh(i,w)).pack(side="right", padx=5, pady=5)
+            ctk.CTkButton(r, text="Edit", fg_color="#3498db", hover_color="#2980b9", width=60, command=lambda i=tid, a=amt, w=top: self.edit_refresh(i, a, w)).pack(side="right", padx=5, pady=5)
 
     def del_refresh(self, tid, w):
         self.controller.backend.delete_transaction(tid)
         w.destroy()
-        self.load()
+        self.load() # Re-fetches the updated data and re-renders
         messagebox.showinfo("Deleted", "Transaction removed from report.")
+
+    def edit_refresh(self, tid, old_amt, w):
+        dialog = ctk.CTkInputDialog(text=f"Enter new amount (Current: {old_amt}):", title="Edit Transaction")
+        new_val = dialog.get_input()
+        if new_val:
+            try:
+                new_amt = float(new_val)
+                if new_amt <= 0: raise ValueError
+                self.controller.backend.update_transaction_amount(tid, new_amt)
+                w.destroy()
+                self.load() # Re-fetches the updated data and re-renders
+                messagebox.showinfo("Success", "Transaction amount updated.")
+            except ValueError:
+                messagebox.showerror("Error", "Please enter a valid positive number.")
 
     def dl(self):
         if self.current_df is not None:
-            # 1. Suggest a filename based on the selected month
             suggested_name = f"Monthly_Report_{self.cur_ym}.xlsx"
-            
-            # 2. Open the "Save As" Dialog
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx")],
-                initialfile=suggested_name,
-                title="Save Report As"
-            )
-            
-            # 3. If user clicked "Cancel", stop
-            if not file_path:
-                return
-
-            # 4. Save to the chosen path
+            file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], initialfile=suggested_name, title="Save Report As")
+            if not file_path: return
             try:
                 fn = self.controller.backend.save_report_to_excel(self.current_df, file_path)
                 messagebox.showinfo("Success", f"Report saved successfully at:\n{fn}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save file:\n{str(e)}")
 
+                
 # --- PAGE 3: VISUALS ---
 class VisualsPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
