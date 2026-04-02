@@ -539,7 +539,7 @@ class ReportsPage(ctk.CTkFrame):
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save file:\n{str(e)}")
 
-                
+
 # --- PAGE 3: VISUALS ---
 class VisualsPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -609,6 +609,7 @@ class VisualsPage(ctk.CTkFrame):
         canvas.get_tk_widget().pack(pady=30)
 
 # --- PAGE 4: SETTINGS (Updated with Business Name) ---
+# --- PAGE 4: SETTINGS (Upgraded with Danger Zone) ---
 class SettingsPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
@@ -620,9 +621,9 @@ class SettingsPage(ctk.CTkFrame):
         self.main_box = ctk.CTkFrame(self, fg_color="transparent")
         self.main_box.pack(fill="both", expand=True, padx=100)
 
-        # 1. Business Name Settings (New)
+        # 1. Business Name Settings
         biz_box = ctk.CTkFrame(self.main_box, fg_color="#2b2b2b", border_width=1, border_color="#444")
-        biz_box.pack(fill="x", pady=10)
+        biz_box.pack(fill="x", pady=5)
         ctk.CTkLabel(biz_box, text="Business Name", font=("Arial", 16, "bold")).pack(side="left", padx=20, pady=20)
         self.biz_entry = ctk.CTkEntry(biz_box, width=250, font=("Arial", 16))
         self.biz_entry.insert(0, self.controller.business_name)
@@ -631,7 +632,7 @@ class SettingsPage(ctk.CTkFrame):
 
         # 2. Currency Settings
         curr_box = ctk.CTkFrame(self.main_box, fg_color="#2b2b2b", border_width=1, border_color="#444")
-        curr_box.pack(fill="x", pady=10)
+        curr_box.pack(fill="x", pady=5)
         ctk.CTkLabel(curr_box, text="Currency Symbol", font=("Arial", 16, "bold")).pack(side="left", padx=20, pady=20)
         self.curr_entry = ctk.CTkEntry(curr_box, width=60, font=("Arial", 16))
         self.curr_entry.insert(0, self.controller.currency_symbol)
@@ -640,14 +641,20 @@ class SettingsPage(ctk.CTkFrame):
 
         # 3. Backup Settings
         bkp_box = ctk.CTkFrame(self.main_box, fg_color="#2b2b2b", border_width=1, border_color="#444")
-        bkp_box.pack(fill="x", pady=10)
+        bkp_box.pack(fill="x", pady=5)
         ctk.CTkLabel(bkp_box, text="Data Protection", font=("Arial", 16, "bold")).pack(side="left", padx=20, pady=20)
         ctk.CTkButton(bkp_box, text="Backup Database Now", command=self.backup, fg_color="#e67e22").pack(side="left", padx=10)
 
-        # 4. Category Manager
-        ctk.CTkLabel(self.main_box, text="Category Manager (Rename / Delete)", font=("Arial", 18, "bold"), anchor="w").pack(fill="x", pady=(30, 10))
-        self.cat_scroll = ctk.CTkScrollableFrame(self.main_box, height=350, fg_color="#2b2b2b")
-        self.cat_scroll.pack(fill="x")
+        # 4. Danger Zone (New Format DB Feature)
+        danger_box = ctk.CTkFrame(self.main_box, fg_color="#3a1111", border_width=1, border_color="#e74c3c")
+        danger_box.pack(fill="x", pady=5)
+        ctk.CTkLabel(danger_box, text="Danger Zone", font=("Arial", 16, "bold"), text_color="#e74c3c").pack(side="left", padx=20, pady=20)
+        ctk.CTkButton(danger_box, text="FORMAT DATABASE", font=("Arial", 14, "bold"), fg_color="#c0392b", hover_color="#922b21", command=self.format_db).pack(side="right", padx=20)
+
+        # 5. Category Manager
+        ctk.CTkLabel(self.main_box, text="Category Manager (Rename / Delete)", font=("Arial", 18, "bold"), anchor="w").pack(fill="x", pady=(20, 5))
+        self.cat_scroll = ctk.CTkScrollableFrame(self.main_box, height=250, fg_color="#2b2b2b")
+        self.cat_scroll.pack(fill="x", pady=(0, 20))
         
     def refresh(self):
         # Refresh inputs in case they were changed externally
@@ -692,6 +699,39 @@ class SettingsPage(ctk.CTkFrame):
         if folder:
             path = self.controller.backend.create_backup(folder)
             messagebox.showinfo("Backup Successful", f"Database saved to:\n{path}")
+
+    # --- NEW: Multi-Step Format Logic ---
+    def format_db(self):
+        # Step 1: Export Verification
+        export_check = messagebox.askyesno("Export Verification", "STOP!\n\nHave you safely exported all your monthly Excel files to local memory?\n\nThis will DELETE all transaction history permanently.")
+        if not export_check:
+            return
+
+        # Step 2: Auto-Backup Suggestion
+        backup_check = messagebox.askyesno("Create Fallback Backup", "Would you like to create a secure .db backup file right now before formatting, just in case?")
+        if backup_check:
+            folder = filedialog.askdirectory(title="Select Folder for Safety Backup")
+            if folder:
+                self.controller.backend.create_backup(folder)
+            else:
+                messagebox.showwarning("Warning", "Backup skipped. Proceeding to format.")
+
+        # Step 3: The Kill Switch (Secret Text)
+        dialog = ctk.CTkInputDialog(text="To confirm format, type the word 'DELETE' below:", title="Final Warning")
+        ans = dialog.get_input()
+        
+        if ans == "DELETE":
+            success = self.controller.backend.format_database()
+            if success:
+                # Refresh all pages so graphs and tables clear out immediately
+                self.controller.frames["page1"].refresh()
+                self.controller.frames["page2"].refresh()
+                self.controller.frames["page_visuals"].refresh()
+                messagebox.showinfo("Formatted", "Database has been cleanly formatted. You are ready for a new time period.")
+            else:
+                messagebox.showerror("Error", "Failed to format database.")
+        elif ans is not None:
+            messagebox.showerror("Aborted", "Typed word did not match 'DELETE'. Formatting aborted.")
 
     def rename(self, old, new, typ):
         if old == new or not new: return

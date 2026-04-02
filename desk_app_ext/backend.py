@@ -191,3 +191,18 @@ class BackendManager:
 
     def close(self):
         self.conn.close()
+
+    def format_database(self):
+        """
+        Deletes all transaction history to start a fresh period.
+        Keeps settings, business name, and categories intact.
+        """
+        try:
+            self.cursor.execute("DELETE FROM transactions")
+            # Reset the auto-increment counter for IDs back to 0
+            self.cursor.execute("DELETE FROM sqlite_sequence WHERE name='transactions'")
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Format Error: {e}")
+            return False
