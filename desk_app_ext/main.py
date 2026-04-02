@@ -1,6 +1,6 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
-from datetime import datetime
+from datetime import datetime, timedelta
 from backend import BackendManager
 import os
 import ctypes
@@ -120,6 +120,8 @@ class BusinessTrackerApp(ctk.CTk):
         self.destroy()        # 3. Now actually destroy the window
 
 # --- PAGE 1: TRANSACTION DASHBOARD ---
+# --- PAGE 1: TRANSACTION DASHBOARD ---
+# --- PAGE 1: TRANSACTION DASHBOARD ---
 class TransactionPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
@@ -130,11 +132,9 @@ class TransactionPage(ctk.CTkFrame):
         self.head = ctk.CTkFrame(self, fg_color="transparent")
         self.head.pack(fill="x", padx=40, pady=(30, 20))
         
-        # Title Left (Now Dynamic)
         self.title_label = ctk.CTkLabel(self.head, text=self.controller.business_name, font=("Georgia", 36, "bold"), text_color="#eee")
         self.title_label.pack(side="left")
 
-        # Cards Right
         self.card_frame = ctk.CTkFrame(self.head, fg_color="transparent")
         self.card_frame.pack(side="right")
         self.lbl_inc = self.create_card("Total Income", "#2ecc71")
@@ -157,15 +157,41 @@ class TransactionPage(ctk.CTkFrame):
         self.cat_menu.grid(row=0, column=2, padx=15, pady=20, sticky="ew")
 
         # Row 2 Inputs
-        self.date_menu = ctk.CTkOptionMenu(self.input_card, values=["Today", "Select Date..."], command=self.handle_date, height=40, fg_color="#333")
+        self.date_menu = ctk.CTkOptionMenu(self.input_card, values=["Today", "Yesterday", "Select Date..."], command=self.handle_date, height=40, fg_color="#333")
         self.date_menu.grid(row=1, column=0, columnspan=2, padx=15, pady=(0, 20), sticky="ew")
         
-        ctk.CTkButton(self.input_card, text="ADD ENTRY +", fg_color="#107a0c", hover_color="#0d630a", height=45, font=("Arial", 16, "bold"), command=self.add_txn).grid(row=1, column=2, padx=15, pady=(0, 20), sticky="ew")
+        self.add_btn = ctk.CTkButton(self.input_card, text="ADD ENTRY +", fg_color="#107a0c", hover_color="#0d630a", height=45, font=("Arial", 16, "bold"), command=self.add_txn)
+        self.add_btn.grid(row=1, column=2, padx=15, pady=(0, 20), sticky="ew")
 
-        # --- Table Header ---
+        # --- ADVANCED KEYBOARD BINDINGS ---
+        
+        # 1. Amount Entry
+        self.amount_entry.bind("<Return>", self.add_txn)
+        self.amount_entry.bind("<Right>", self.nav_right_from_amount)
+        
+        # 2. Type Menu (Deep bindings for CTkOptionMenu)
+        for w in [self.type_menu, getattr(self.type_menu, '_canvas', None), getattr(self.type_menu, '_text_label', None)]:
+            if w:
+                w.bind("<Right>", lambda e: self.cat_menu.focus())
+                w.bind("<Left>", lambda e: self.amount_entry.focus())
+                w.bind("<Up>", lambda e: self.cycle_type(-1))
+                w.bind("<Down>", lambda e: self.cycle_type(1))
+
+        # 3. Category Menu (Deep bindings for CTkComboBox)
+        cat_entry = getattr(self.cat_menu, '_entry', self.cat_menu)
+        cat_entry.bind("<Return>", self.add_txn)
+        cat_entry.bind("<Left>", self.nav_left_from_cat)
+        cat_entry.bind("<Right>", lambda e: self.amount_entry.focus()) # Wraps back to amount
+        cat_entry.bind("<Up>", lambda e: self.cycle_cat(-1))
+        cat_entry.bind("<Down>", lambda e: self.cycle_cat(1))
+
+
+        # --- Table Header (Now includes Date) ---
         self.table_head = ctk.CTkFrame(self, height=40, fg_color="#333", corner_radius=5)
         self.table_head.pack(padx=40, pady=(20, 0), fill="x")
-        headers = [("Time", 100), ("Type", 120), ("Category", 250), ("Amount", 150), ("Action", 80)]
+        
+        # Added "Date" as the first column
+        headers = [("Date", 110), ("Time", 80), ("Type", 100), ("Category", 230), ("Amount", 150), ("Action", 80)]
         for name, w in headers:
             ctk.CTkLabel(self.table_head, text=name, width=w, font=("Arial", 14, "bold"), anchor="w", text_color="#ccc").pack(side="left", padx=10)
 
@@ -182,7 +208,6 @@ class TransactionPage(ctk.CTkFrame):
         return l
 
     def refresh(self):
-        # Update the Title to match the Settings
         self.title_label.configure(text=self.controller.business_name)
         self.update_cats(self.type_menu.get())
         self.load_data()
@@ -193,16 +218,63 @@ class TransactionPage(ctk.CTkFrame):
         if cats: self.cat_menu.set(cats[0])
         else: self.cat_menu.set("")
 
+    # --- KEYBOARD NAVIGATION HELPERS ---
+    def nav_right_from_amount(self, event):
+        # Only jump right if the typing cursor is at the very end of the numbers
+        if self.amount_entry.index("insert") == len(self.amount_entry.get()):
+            self.type_menu.focus()
+            return "break"
+
+    def nav_left_from_cat(self, event):
+        # Only jump left if the typing cursor is at the very beginning of the category text
+        cat_entry = getattr(self.cat_menu, '_entry', self.cat_menu)
+        if cat_entry.index("insert") == 0:
+            self.type_menu.focus()
+            return "break"
+
+    def cycle_type(self, step):
+        vals = ["Expense", "Profit"]
+        curr = self.type_menu.get()
+        try:
+            new_val = vals[(vals.index(curr) + step) % len(vals)]
+            self.type_menu.set(new_val)
+            self.update_cats(new_val)
+        except ValueError: pass
+        return "break" # Prevents default Tkinter scrolling
+
+    def cycle_cat(self, step):
+        vals = self.controller.backend.get_categories(self.type_menu.get())
+        if not vals: return "break"
+        curr = self.cat_menu.get()
+        try:
+            new_val = vals[(vals.index(curr) + step) % len(vals)]
+            self.cat_menu.set(new_val)
+        except ValueError:
+            self.cat_menu.set(vals[0])
+        return "break" # Prevents default Tkinter dropdown from opening
+
+    # --- DATE FORMATTER ---
     def handle_date(self, val):
         if val == "Select Date...":
-            d = ctk.CTkInputDialog(title="Date Selector", text="Enter Date (YYYY-MM-DD):").get_input()
+            d = ctk.CTkInputDialog(title="Date Selector", text="Enter Date (DD-MM-YYYY):").get_input()
             if d: 
-                self.current_view_date = d
-                self.date_menu.set(d)
+                try:
+                    parsed = datetime.strptime(d, "%d-%m-%Y")
+                    self.current_view_date = parsed.strftime("%Y-%m-%d")
+                    self.date_menu.set(d)
+                except ValueError:
+                    messagebox.showerror("Invalid Date", "Please use the exact format: DD-MM-YYYY")
+                    self.date_menu.set("Today")
+                    self.current_view_date = datetime.now().strftime("%Y-%m-%d")
             else:
                 self.date_menu.set("Today")
-        else:
+                self.current_view_date = datetime.now().strftime("%Y-%m-%d")
+                
+        elif val == "Yesterday":
+            self.current_view_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        else: # "Today"
             self.current_view_date = datetime.now().strftime("%Y-%m-%d")
+            
         self.load_data()
 
     def load_data(self):
@@ -216,14 +288,22 @@ class TransactionPage(ctk.CTkFrame):
             if typ == "Profit": inc += amt
             else: exp += amt
             
+            # Convert backend YYYY-MM-DD to DD-MM-YYYY for display
+            try:
+                display_date = datetime.strptime(date, "%Y-%m-%d").strftime("%d-%m-%Y")
+            except:
+                display_date = date
+            
             row = ctk.CTkFrame(self.scroll, fg_color="#2b2b2b", corner_radius=6)
             row.pack(fill="x", pady=3)
             
             color = "#2ecc71" if typ == "Profit" else "#e74c3c"
             
-            ctk.CTkLabel(row, text=time, width=100, font=("Consolas", 14), anchor="w").pack(side="left", padx=10)
-            ctk.CTkLabel(row, text=typ, width=120, text_color=color, font=("Arial", 14, "bold"), anchor="w").pack(side="left", padx=10)
-            ctk.CTkLabel(row, text=cat, width=250, font=("Arial", 14), anchor="w").pack(side="left", padx=10)
+            # NEW: Date column added to the row
+            ctk.CTkLabel(row, text=display_date, width=110, font=("Consolas", 14), anchor="w").pack(side="left", padx=10)
+            ctk.CTkLabel(row, text=time, width=80, font=("Consolas", 14), anchor="w").pack(side="left", padx=10)
+            ctk.CTkLabel(row, text=typ, width=100, text_color=color, font=("Arial", 14, "bold"), anchor="w").pack(side="left", padx=10)
+            ctk.CTkLabel(row, text=cat, width=230, font=("Arial", 14), anchor="w").pack(side="left", padx=10)
             ctk.CTkLabel(row, text=f"{sym}{amt:,.2f}", width=150, text_color=color, font=("Arial", 14, "bold"), anchor="w").pack(side="left", padx=10)
             
             ctk.CTkButton(row, text="Delete", width=60, fg_color="#922b21", hover_color="#c0392b", height=30, 
@@ -233,7 +313,7 @@ class TransactionPage(ctk.CTkFrame):
         self.lbl_exp.configure(text=f"{sym}{exp:,.2f}")
         self.lbl_bal.configure(text=f"{sym}{inc-exp:,.2f}")
 
-    def add_txn(self):
+    def add_txn(self, event=None):
         try:
             amt_str = self.amount_entry.get()
             if not amt_str: return
@@ -251,7 +331,10 @@ class TransactionPage(ctk.CTkFrame):
             )
             self.amount_entry.delete(0, 'end')
             self.refresh()
-        except: messagebox.showerror("Error", "Invalid Amount")
+            self.amount_entry.focus()
+            
+        except ValueError: 
+            messagebox.showerror("Error", "Invalid Amount")
 
     def del_txn(self, tid):
         if messagebox.askyesno("Confirm Deletion", "Are you sure you want to delete this entry?"):
