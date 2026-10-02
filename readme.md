@@ -454,13 +454,13 @@ Contributions, bug reports, and feature ideas are welcome.
 5. Open a Pull Request
 
 ---
-
+<!--
 ## 📄 License
 
 No license has been specified for this project yet. Add a `LICENSE` file to define how others may use, modify, and distribute it.
 
 ---
-
+-->
 <div align="center">
 
 **Built with ❤️ by [Karan](https://github.com/sjkaran)**
